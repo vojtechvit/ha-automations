@@ -1,0 +1,136 @@
+blueprint:
+  name: Room occupancy monitor
+  description:
+    Sets the occupancy indicator status helper input based on a combination of
+    door and motion sensors.
+
+    If the doors are closed and there is motion, the status is set to Occupied.
+
+    If the doors are closed and there is no motion, the status is set to Vacant.
+
+    If the doors are open or it's not possible to confidently determine the
+    occupancy, the status is set to Unknown.
+  domain: automation
+  source_url: https://www.example.org
+  input:
+    motion_entity_id:
+      name: Motion Sensor
+      description: The motion sensors to track movement in the closed room
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    door_entity_id:
+      name: Door Sensor
+      description: The door sensors of all doors in the room
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: door
+    occupancy_entity_id:
+      name: Occupancy indicator
+      description: The helper select input to store the occupancy state in
+      selector:
+        entity:
+          domain: input_select
+    occupancy_status_unknown:
+      name: Unknown status name
+      description: The occupancy indicator option name representing an unknown status
+      default: Unknown
+      selector:
+        text:
+    occupancy_status_vacant:
+      name: Vacant status name
+      description: The occupancy indicator option name representing a vacant status
+      default: Vacant
+      selector:
+        text:
+    occupancy_status_occupied:
+      name: Occupied status name
+      description: The occupancy indicator option name representing an occupied status
+      default: Occupied
+      selector:
+        text:
+    wait_duration:
+      name: Wait time
+      description:
+        The time to wait after the doors get closed before checking for movement
+        (needed since most motion sensors have a limited status refresh rate)
+      default: 15
+      selector:
+        number:
+          min: 0.0
+          max: 360.0
+          unit_of_measurement: seconds
+          step: 1.0
+          mode: slider
+    occupancy_evaluation_duration:
+      name: Evaluation time
+      description: The duration of no movement after the doors get closed before
+        considering the room vacant
+      default: 60
+      selector:
+        number:
+          min: 0.0
+          max: 360.0
+          unit_of_measurement: seconds
+          step: 1.0
+          mode: slider
+mode: restart
+max_exceeded: silent
+variables:
+  door_entity_id: !input "door_entity_id"
+trigger:
+  platform: state
+  entity_id: !input "door_entity_id"
+  attribute: contact
+action:
+  - alias: "Set the occupancy status to uknown"
+    service: input_select.select_option
+    entity_id: !input "occupancy_entity_id"
+    data:
+      option: !input "occupancy_status_unknown"
+  - choose:
+      - alias: "If door is closed"
+        conditions:
+          - condition: state
+            entity_id: !input "door_entity_id"
+            attribute: contact
+            state: true
+        sequence:
+          - alias: "Wait before evaluating occupancy"
+            delay: !input "wait_duration"
+          - choose:
+              - alias: "If motion is detected"
+                conditions:
+                  - condition: state
+                    entity_id: !input "motion_entity_id"
+                    state: "on"
+                sequence:
+                  - alias: "Set the occupancy status to occupied"
+                    service: input_select.select_option
+                    entity_id: !input "occupancy_entity_id"
+                    data:
+                      option: !input "occupancy_status_occupied"
+            default:
+              - alias: "Wait for some motion"
+                wait_for_trigger:
+                  platform: state
+                  entity_id: !input "motion_entity_id"
+                  to: "on"
+                timeout: !input "occupancy_evaluation_duration"
+              - choose:
+                  - alias: "If motion was detected"
+                    conditions: "{{ wait.trigger != none }}"
+                    sequence:
+                      - alias: "Set the occupancy status to occupied"
+                        service: input_select.select_option
+                        entity_id: !input "occupancy_entity_id"
+                        data:
+                          option: !input "occupancy_status_occupied"
+                default:
+                  - alias: "Set the occupancy status to vacant"
+                    service: input_select.select_option
+                    entity_id: !input "occupancy_entity_id"
+                    data:
+                      option: !input "occupancy_status_vacant"
